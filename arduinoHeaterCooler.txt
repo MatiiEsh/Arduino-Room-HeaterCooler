@@ -1,0 +1,220 @@
+//Ultima modificare: 31.05, ora 01:14
+
+//Libraries for the digital thermometer
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+//analog input PINS
+#define requestHeat A0  
+#define requestCooling A1  
+
+//relay PINS, each relay is a speed of a fan and the relayValve is to forward water outside the main system  
+#define relayS1 7
+#define relayS2 6
+#define relayS3 5
+#define relayValve 4
+
+//minimum temperature of water to enable cooling or heating
+#define thresholdCooling 25
+#define thresholdHeating 28
+
+//request thresholds
+#define temperatureErrorMargin 1
+#define thresholdS1 1
+#define thresholdS2 333
+#define thresholdS3 666
+#define MAX 1024
+
+//DS18B20 digital thermometer PINS
+#define DS18B20 11
+#define sourceDS18B20 12 // using PIN 12 as a source for DS18B20
+#define errorLed 13
+
+OneWire oneWire(DS18B20);
+DallasTemperature sensor(&oneWire);
+
+//boolean variables for establishing the priority if the water temperature is above or under the thresholds
+bool priorityCooling = false;
+bool priorityHeating = false;
+
+void setup() {
+  
+  //PINS declaration
+  Serial.begin(9600);
+  pinMode(requestHeat,INPUT);
+  pinMode(requestCooling,INPUT);
+  pinMode(relayS1,OUTPUT);
+  pinMode(relayS2,OUTPUT);
+  pinMode(relayS3,OUTPUT);
+  pinMode(relayValve,OUTPUT);
+  pinMode(sourceDS18B20,OUTPUT);
+  pinMode(errorLed,OUTPUT);
+
+  digitalWrite(sourceDS18B20,HIGH);  
+  //sensor activation
+  sensor.begin();
+  
+}
+
+void loop() {
+ 
+//calling prioritySetting method to set the priority of either heating or cooling
+    prioritySetting(tempRead());  
+
+//when the water temperature is under the lower threshold there is priority for cooling
+    if(priorityCooling){  
+      displayData(tempRead());
+      stageControl(readingRequests());
+    }
+
+//when the water temperature is over the higher threshold there is priority for heating
+    if(priorityHeating){  
+      displayData(tempRead());
+      stageControl(readingRequests());
+    }
+
+//when the water temperature is between the higher and lower threshold water is no good for either the heating or cooling
+    if(!priorityCooling && !priorityHeating){
+      displayData(tempRead());
+      waterForwarding();
+    }
+  
+}
+
+//method for reading the request and returning the request value
+int readingRequests(){  
+
+    int dataHeat = analogRead(requestHeat); //reading if there is a heating request
+    int dataCold = analogRead(requestCooling); //reading if there is a cooling request
+
+//if there is both heating and cooling request, this means there is an error, nothing will happen
+    if(dataHeat > 0 && dataCold > 0){
+      return 0;
+    }
+
+//if there is a heating request, no cooling request and priority for heating(water is over higher threshold), returns the request value
+    if(dataHeat > 0 && dataCold < 1 && priorityHeating){
+      return dataHeat;
+    }
+//if there is a cooling request, no heating request and priority for cooling(water is under lower threshold), returns the request value    
+    if(dataCold > 0 && dataHeat < 1 && priorityCooling){ //daca se cere racire si nu este cerere de incalzire, returneaza cererea de racire
+      return dataCold;
+    } 
+  }
+
+//method for proccesing the requests
+void stageControl(int data){
+    //activating the valve to forward water in the system
+    digitalWrite(relayValve,HIGH);
+  
+//activating stage 1 of the fan speed, stageX() is a method for activating relaySX, where X is 1, 2 or 3
+    if(data > thresholdS1 && data < thresholdS2){      
+      stage1();                             
+      Serial.println("Stage 1 Activated!");  
+    }
+    
+    if(data>thresholdS2 && data<thresholdS3){ 
+      stage2();                
+      Serial.println("Stage 2 Activated!"); 
+    }
+      
+    if(data>thresholdS3 && data<MAX){  
+      stage3();                  
+      Serial.println("Stage 3 Activated!"); 
+    }
+
+//if there is no request, forward the water from the main system
+    if(data < 1){ waterForwarding(); }
+  
+}
+
+//method for setting the priorities
+void prioritySetting(int temp){
+
+//if DS18B20 is disconnected or no longer sends data, the value read by the program is -127 so there is an error.
+    if(temp < 0){
+      temperatureError();
+      Serial.println("Error reading the temperature!");
+    }
+
+//if the read temperature is under the threshold for cooling then it goes under the threshold minus an error margin, priority will be established
+    if(temp < thresholdCooling){
+      if(temp < thresholdCooling-temperatureErrorMargin){
+        priorityHeating = false;
+        priorityCooling = true;
+      }
+    }
+
+//if the read temperature is over the threshold for heating then it goes over the threshold plus an error margin, priority will be established    
+    if(temp > thresholdHeating){
+      if(temp > thresholdHeating+temperatureErrorMargin){
+        priorityCooling = false;
+        priorityHeating = true;
+      }
+    }
+
+//if the read temperature is between thresholds, there is no priority
+    if(temp > thresholdCooling && temp < thresholdHeating){
+      priorityCooling = false;
+      priorityHeating = false;
+    }
+}
+
+//method for reading temperatures from the thermometer
+float tempRead(){
+    sensor.requestTemperatures();
+    float tempC = sensor.getTempCByIndex(0);
+    return tempC;
+}
+
+//method for activating stage 1
+void stage1(){
+  digitalWrite(relayS2,LOW);
+  digitalWrite(relayS3,LOW);
+  digitalWrite(relayS1,HIGH);
+}
+
+//method for activating stage 2
+void stage2(){
+  digitalWrite(relayS1,LOW);
+  digitalWrite(relayS3,LOW);
+  digitalWrite(relayS2,HIGH);
+}
+
+//method for activating stage 3
+void stage3(){
+  digitalWrite(relayS1,LOW);
+  digitalWrite(relayS2,LOW);
+  digitalWrite(relayS3,HIGH);
+}
+
+////method for activating water valve 
+void waterForwarding(){
+  digitalWrite(relayS1,LOW);
+  digitalWrite(relayS2,LOW);
+  digitalWrite(relayS3,LOW);
+  digitalWrite(relayValve,LOW);
+} 
+
+//method for a visual cue if the temperature reading has an error
+void temperatureError(){
+  for(int i=0;i<=4;i++){
+  digitalWrite(errorLed, HIGH);
+  delay(300);
+  digitalWrite(errorLed, LOW);
+  delay(300);
+  }
+}
+
+//dplaying data in the serial monitor
+void displayData(float tempRead){
+
+    int dataHeat = analogRead(requestHeat);
+    int dataCold = analogRead(requestCooling);
+  
+    Serial.println((String)"Water Temperature: "+tempRead);
+    Serial.println((String)"Heating: "+priorityHeating+"; Request: "+dataHeat);
+    Serial.println((String)"Cooling: "+priorityCooling+"; Request: "+dataCold);
+    Serial.println(); 
+  
+}
