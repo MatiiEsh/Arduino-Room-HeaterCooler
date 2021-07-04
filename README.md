@@ -1,5 +1,6 @@
 # ard_roomHeater
-This README file only explains how the project works and some things that I feel are harder to understand why I used them in that way. 
+This README file only explains how the project works and some things that I feel are harder to understand why I used them in that way.
+The file with the code is arduinoHeaterCooler.txt
 Any feedback or questions on the code is much welcome as I am a beginner.
 
 Automating a room heating system which comprises of a heat converter and a fan, using an ArduinoUno board, a 4-Relay Shield and a one wire DS18B20 thermometer and a 5k Ohm resistor.
